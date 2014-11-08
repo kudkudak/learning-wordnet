@@ -1,3 +1,5 @@
+#Todo: random batch sampling
+
 from config import *
 from utils import *
 

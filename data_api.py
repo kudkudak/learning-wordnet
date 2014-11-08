@@ -7,6 +7,8 @@ from utils import *
 import scipy
 import scipy.io
 
+REL_IDX=1
+
 def dataset_to_dir(dataset="Wordnet"):
     if dataset == "Wordnet":
         return c["WORDNET_DIR"]
@@ -144,13 +146,29 @@ def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, batch_si
 
     ent, rel = data_desc['ent'], data_desc['rel']
 
-    M = test_data
+    X_rel = []
+    X_test_rel = []
+    for rel_idx in range(len(rel)):
+        X_rel.append(X[X[:,REL_IDX]==rel_idx])
+        X_test_rel.append(test_data[test_data[:,REL_IDX]==rel_idx])
+
+
+    return {"X":X_rel, "X_test":X_test_rel, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
+
+
+
+def generate_batches(X, X_test, batch_size=100, tr_batch_count = None, randomize=0):
+    if tr_batch_count is not None:
+        batch_size = X.shape[0]/tr_batch_count
+
+    M = X_test
     eq = M.shape[0] - M.shape[0]%batch_size
     if eq > 0:
         X_test_batches=np.split(M[0:eq], eq/batch_size)
         X_test_batches.append(M[eq:])
     else:
-        X_test_batches = [test_data]
+        X_test_batches = [X_test]
+
     M = X
     eq = M.shape[0] - M.shape[0]%batch_size
     if eq > 0:
@@ -159,9 +177,7 @@ def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, batch_si
     else:
         X_batches = [X]
 
-    return {"X":X_batches, "X_test":X_test_batches, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
-
-
+    return X_batches, X_test_batches
 ##TODO: add corruption schema get_corrupted_allowable, and then we can work on both train and test data and perform cross validation.
 
 
