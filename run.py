@@ -1,12 +1,22 @@
+#TODO: add randomized sampling
+
 from model import *
 from data_api import *
 
-X = prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0)
+@cached_FS()
+def train_model():
 
-u = TensorKnowledgeLearner(0, 3,  X["U"], X["E"])
+    X = prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, force_reload=True)
 
-t = SGD(u, lr=0.01)
+    u = TensorKnowledgeLearner(0, 3,  X["U"], X["E"])
 
-batches_train, batches_test = generate_batches(X["X"][0], X["X_test"][0], batch_size=None, tr_batch_count=30)
+    t = SGD(u, lr=0.5, num_updates=20, valid_freq=2)
 
-t.train(batches_train, batches_test)
+    batches_train, batches_test = generate_batches(X["X"], X["X_test"], batch_size=10000)
+
+    t.train(batches_train, batches_test)
+
+    return u
+
+
+train_model()

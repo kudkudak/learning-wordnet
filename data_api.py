@@ -85,7 +85,7 @@ def get_train_raw_data(dataset="Wordnet"):
     return data
 
 #Can be used to corrupt both training and testing data
-def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10):
+def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10, both_sides=False):
     X = np.zeros(shape=(len(data)*multiplication, 5), dtype="int32") # 4 because we will add corrupted entity
     data_desc = get_data_desc(dataset=dataset)
     ent, rel = data_desc['ent'], data_desc['rel']
@@ -96,7 +96,7 @@ def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10):
         for id, row in enumerate(data):
             X[batch_size*batch + id, 0:3] = row
 
-            if np.random.randint(2) == 0:
+            if np.random.randint(2) == 0 and both_sides:
                 X[batch_size*batch + id, 3] = np.random.randint(0, len(ent)) # why not corrupt relation? especially slightly.
                 X[batch_size*batch + id, 4] = row[2]
             else:
@@ -116,7 +116,7 @@ def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10):
 
 @timed
 @cached_FS(use_cPickle=True)
-def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, batch_size=20000):
+def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, split_relation=True):
     assert(CV == 0)
 
     #TODO: add corruption for test data aswell and do CV
@@ -135,7 +135,7 @@ def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, batch_si
     for e,idx in data_desc["ent"].iteritems():
         words = e[2:].split("_")[0:-1]
         indexes = [data_desc["word_to_embedding"].get(w, data_desc["word_to_embedding"]["unknown"]) for w in words]
-        data += [1 for i in xrange(len(words))]
+        data += [1.0/len(words) for i in xrange(len(words))]
         indices += indexes
         indptr.append(indptr[-1] + len(indexes))
 
@@ -146,36 +146,42 @@ def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, batch_si
 
     ent, rel = data_desc['ent'], data_desc['rel']
 
-    X_rel = []
-    X_test_rel = []
-    for rel_idx in range(len(rel)):
-        X_rel.append(X[X[:,REL_IDX]==rel_idx])
-        X_test_rel.append(test_data[test_data[:,REL_IDX]==rel_idx])
 
+    if split_relation:
+        X_rel = []
+        X_test_rel = []
+        for rel_idx in range(len(rel)):
+            X_rel.append(X[X[:,REL_IDX]==rel_idx])
+            X_test_rel.append(test_data[test_data[:,REL_IDX]==rel_idx])
 
-    return {"X":X_rel, "X_test":X_test_rel, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
-
-
-
-def generate_batches(X, X_test, batch_size=100, tr_batch_count = None, randomize=0):
-    if tr_batch_count is not None:
-        batch_size = X.shape[0]/tr_batch_count
-
-    M = X_test
-    eq = M.shape[0] - M.shape[0]%batch_size
-    if eq > 0:
-        X_test_batches=np.split(M[0:eq], eq/batch_size)
-        X_test_batches.append(M[eq:])
+        return {"X":X_rel, "X_test":X_test_rel, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
     else:
-        X_test_batches = [X_test]
+        return {"X":X, "X_test":test_data, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
 
-    M = X
-    eq = M.shape[0] - M.shape[0]%batch_size
-    if eq > 0:
-        X_batches=np.split(M[0:eq], eq/batch_size)
-        X_batches.append(M[eq:])
-    else:
-        X_batches = [X]
+
+def generate_batches(X_all, X_test_all, batch_size=100, randomize=0):
+    X_test_batches = []
+    X_batches = []
+
+    for X, X_test in zip(X_all, X_test_all):
+        # if min_size is not None:
+        #     batch_size = X.shape[0]/min_size
+
+        M = X_test
+        eq = M.shape[0] - M.shape[0]%batch_size
+        if eq > 0:
+            X_test_batches=np.split(M[0:eq], eq/batch_size)
+            X_test_batches.append(M[eq:])
+        else:
+            X_test_batches.append(X_test)
+
+        M = X
+        eq = M.shape[0] - M.shape[0]%batch_size
+        if eq > 0:
+            X_batches=np.split(M[0:eq], eq/batch_size)
+            X_batches.append(M[eq:])
+        else:
+            X_batches.append(X)
 
     return X_batches, X_test_batches
 ##TODO: add corruption schema get_corrupted_allowable, and then we can work on both train and test data and perform cross validation.

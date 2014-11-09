@@ -36,5 +36,8 @@ c = {
     "TRAIN_FILE": "train.txt",
     "WORDNET_DIR":os.path.join(base_dir, "data/Wordnet"),
     "BASE_DIR":base_dir,
-    "TEST_FILE" : "test_all.txt"
+    "TEST_FILE" : "test_all.txt",
+    "WORDNET_TEST_SIZE": 21088,
+    "WORDNET_DEV_SIZE": 5218,
+    "REL_IDX":1
 }
