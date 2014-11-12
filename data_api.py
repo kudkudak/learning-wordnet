@@ -84,8 +84,18 @@ def get_train_raw_data(dataset="Wordnet"):
             data.append([ent[e1], rel[r], ent[e2]])
     return data
 
+
 #Can be used to corrupt both training and testing data
-def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10, both_sides=False):
+def get_train_data(dataset="Wordnet"):
+    data = get_train_raw_data(dataset=dataset)
+    return np.array(data, dtype="int32")
+
+
+
+#Can be used to corrupt both training and testing data
+def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10, seed=0, both_sides=True):
+    np.random.seed(seed)
+
     X = np.zeros(shape=(len(data)*multiplication, 5), dtype="int32") # 4 because we will add corrupted entity
     data_desc = get_data_desc(dataset=dataset)
     ent, rel = data_desc['ent'], data_desc['rel']
@@ -105,32 +115,25 @@ def get_corrupted_randomly_data(data, dataset="Wordnet", multiplication=10, both
 
 
             #TODO: explore better corruption schemas taking into consideration proximity of relations or something like that
-            #Also proximity of entities.
-            #But we can delearn good relation. what then? damn!
-    # Each data --> 2 data entries
-    # number of entries = multiplication * data_size
 
     return np.random.permutation(X)
 
 
 
+
 @timed
 @cached_FS(use_cPickle=True)
-def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, split_relation=True):
+def prepare_experiment_data(dataset="Wordnet", CV=0):
     assert(CV == 0)
 
-    #TODO: add corruption for test data aswell and do CV
-    train_data = get_train_raw_data(dataset=dataset)
-    X = get_corrupted_randomly_data(train_data, dataset=dataset, multiplication=multiplication)
+    train_data = get_train_data(dataset=dataset)
     data_desc = get_data_desc(dataset=dataset)
-
     test_data = get_test_data(dataset=dataset)
 
     # Prepare sparse matrix E
     data = []
     indices = []
     indptr = [0] # shape len(data_desc["entity"]) + !
-    import itertools
 
     for e,idx in data_desc["ent"].iteritems():
         words = e[2:].split("_")[0:-1]
@@ -139,51 +142,48 @@ def prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, split_re
         indices += indexes
         indptr.append(indptr[-1] + len(indexes))
 
-    print(len(indptr))
-
     E = scipy.sparse.csr_matrix((np.array(data, dtype="float64"), np.array(indices, dtype="int64"), np.array(indptr, dtype="int64")),\
                                 shape=(len(data_desc["ent"]), data_desc["U"].shape[0]))
 
     ent, rel = data_desc['ent'], data_desc['rel']
 
+    return {"X":train_data, "X_test":test_data, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel, "dataset":dataset}
+
+import random
+
+@cached_FS(load_fnc=numpy_load_fnc, save_fnc=numpy_save_fnc, check_fnc=numpy_check_fnc)
+def generate_batches(E, batch_size=100, \
+                     randomize=True, seed=0, split_relation=True, multiplication=10):
+    train_data = get_corrupted_randomly_data(E["X"], dataset=E["dataset"], multiplication=multiplication, seed=seed)
+    #test_data = E["X_test"]
+
+    ent, rel = E['ent'], E['rel']
+
+    X_all = [train_data]
+    #X_test_all = [test_data]
 
     if split_relation:
-        X_rel = []
-        X_test_rel = []
+        X_all = []
+        #X_test_all = []
         for rel_idx in range(len(rel)):
-            X_rel.append(X[X[:,REL_IDX]==rel_idx])
-            X_test_rel.append(test_data[test_data[:,REL_IDX]==rel_idx])
-
-        return {"X":X_rel, "X_test":X_test_rel, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
-    else:
-        return {"X":X, "X_test":test_data, "U":data_desc["U"], "E":E, "ent":ent, "rel":rel}
+            X_all.append(train_data[train_data[:,REL_IDX]==rel_idx])
+            #X_test_all.append(test_data[test_data[:,REL_IDX]==rel_idx])
 
 
-def generate_batches(X_all, X_test_all, batch_size=100, randomize=0):
-    X_test_batches = []
     X_batches = []
-
-    for X, X_test in zip(X_all, X_test_all):
-        # if min_size is not None:
-        #     batch_size = X.shape[0]/min_size
-
-        M = X_test
+    for M in X_all:
         eq = M.shape[0] - M.shape[0]%batch_size
         if eq > 0:
-            X_test_batches=np.split(M[0:eq], eq/batch_size)
-            X_test_batches.append(M[eq:])
-        else:
-            X_test_batches.append(X_test)
-
-        M = X
-        eq = M.shape[0] - M.shape[0]%batch_size
-        if eq > 0:
-            X_batches=np.split(M[0:eq], eq/batch_size)
+            X_batches += np.split(M[0:eq], eq/batch_size)
             X_batches.append(M[eq:])
         else:
-            X_batches.append(X)
+            X_batches.append(M)
 
-    return X_batches, X_test_batches
+    if randomize:
+        random.seed(seed)
+        random.shuffle(X_batches)
+
+    return X_batches
 ##TODO: add corruption schema get_corrupted_allowable, and then we can work on both train and test data and perform cross validation.
 
 

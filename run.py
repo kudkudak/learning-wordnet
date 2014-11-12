@@ -3,20 +3,21 @@
 from model import *
 from data_api import *
 
-@cached_FS()
+#1.3 mln przykladow na minute (u mnie 600k przykladow ok.)
+
 def train_model():
 
-    X = prepare_experiment_data(dataset="Wordnet", multiplication=10, CV=0, force_reload=True)
+    X = prepare_experiment_data(dataset="Wordnet", CV=0)
 
-    u = TensorKnowledgeLearner(0, 3,  X["U"], X["E"])
+    u = TensorKnowledgeLearner(range(11), 3,  X["U"], X["E"])
+    t = SGD(u, lr=0.3, num_updates=200, L2=0, valid_freq=1)
 
-    t = SGD(u, lr=0.5, num_updates=20, valid_freq=2)
-
-    batches_train, batches_test = generate_batches(X["X"], X["X_test"], batch_size=10000)
-
-    t.train(batches_train, batches_test)
+    for i in range(5):
+        batches_train = generate_batches(E=X, batch_size=50000, seed=i)
+        t.train(batches_train, [X["X_test"]], num_updates=1)
 
     return u
+
 
 
 train_model()
