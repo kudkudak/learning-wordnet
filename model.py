@@ -87,6 +87,8 @@ class TensorKnowledgeLearner(object):
 
         self.params = [self.U, self.W, self.V, self.b, self.u]
 
+        self.EU = theano.shared(np.zeros(shape=(entity_matrix.shape[0], embedding_matrix.shape[1]), dtype=theano.config.floatX), name="EU")
+
         self.input = T.lmatrix()
 
         self.inputs = [self.input] # For trainer
@@ -102,13 +104,17 @@ class TensorKnowledgeLearner(object):
 
         return theano.function([self.input], values)
 
-    @property
-    def cost(self):
+    def update_EU(self):
+        self.EU.set_value(T.cast(theano.sparse.dot(self.E, self.U), theano.config.floatX).eval())
+
+    def cost(self, use_old_EU=False):
         R = self.input[0, c["REL_IDX"]] ## IMPORTANT BATCH IS CONSISTENT FOR COST
 
-        EU = theano.sparse.dot(self.E, self.U) #duzo niepotrzebne.. 20k batch ,
+        EU = self.EU
+        if not use_old_EU:
+            EU = T.cast(theano.sparse.dot(self.E, self.U), theano.config.floatX) #duzo niepotrzebne.. 20k batch ,
 
-        self.margin = 1.0 - (self.activation( EU[self.input[:,0]], EU[self.input[:,2]], R) -
+        self.margin = 1.0 - (self.activation(EU[self.input[:,0]], EU[self.input[:,2]], R) -
                              self.activation(EU[self.input[:,3]], EU[self.input[:,4]], R))
 
         #return T.sum(T.maximum(0.0, self.margin))
@@ -156,8 +162,11 @@ import time
 class SGD(object):
     '''This is a base class for all trainers.'''
 
-    def __init__(self, network, profile=False, lr=0.0001, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.0001):
+    def __init__(self, network, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.0001, compile=True):
         self.profile = profile
+
+
+        self.network = network
 
         self.valid_freq = valid_freq
         self.num_updates = num_updates
@@ -170,21 +179,22 @@ class SGD(object):
         self.epochs = epochs
         self.params = network.params
 
-        self.cost = network.cost + np.float32(L2)*T.sum([(p**2).sum() for p in self.params])
+        self.cost = network.cost() + np.float32(L2)*T.sum([(p**2).sum() for p in self.params])
         self.grads = T.grad(self.cost, self.params)
 
-
-        self.cost_exprs = [self.cost, network.cost]
+        # Expressions evaluated for training
+        self.cost_exprs_update = [self.cost, network.cost()]
         self.cost_names = ['L2 cost', "Network cost"]
         for name, monitor in network.monitors:
             self.cost_names.append(name)
-            self.cost_exprs.append(monitor)
+            self.cost_exprs_update.append(monitor)
 
+        # Expressions when propagating
+        self.cost_exprs_evaluate = [network.cost(use_old_EU=True) + np.float32(L2)*T.sum([(p**2).sum() for p in self.params]), \
+                                network.cost(use_old_EU=True)]
+        for name, monitor in network.monitors:
+            self.cost_exprs_evaluate.append(monitor)
 
-
-
-        self.f_eval = theano.function(
-            network.inputs, self.cost_exprs)
 
         self.shapes = [p.get_value(borrow=True).shape for p in self.params]
         self.counts = [np.prod(s) for s in self.shapes]
@@ -199,14 +209,19 @@ class SGD(object):
         if self.profile:
             mode = theano.ProfileMode(optimizer='fast_run', linker=theano.gof.OpWiseCLinker())
 
-        self.f_learn_R = {}
-        for r in network.R:
-            f_learn = theano.function(
-                network.inputs,
-                [self.cost],
-                updates=list(self.learning_updates(R=r)),mode=mode)
 
-            self.f_learn_R[r] = f_learn
+        if compile:
+            self.f_eval = theano.function(
+            network.inputs, self.cost_exprs_evaluate)
+
+            self.f_learn_R = {}
+            for r in network.R:
+                f_learn = theano.function(
+                    network.inputs,
+                    self.cost_exprs_update,
+                    updates=list(self.learning_updates(R=r)),mode=mode)
+
+                self.f_learn_R[r] = f_learn
 
     def flat_to_arrays(self, x):
         x = x.astype(self.dtype)
@@ -235,13 +250,12 @@ class SGD(object):
                 yield velocity, T.cast(self.momentum * velocity - delta, theano.config.floatX)
                 yield param, param + velocity
             else:
-                print(self.shapes[i])
+
                 if len(self.shapes[i])==2:
                     delta = self.lr * grads[i][:,R]
                     velocity = theano.shared(
                         np.zeros(shape=self.shapes[i][0:-1], dtype=theano.config.floatX), name=param.name + str(R)+'_vel')
                     subgrad = T.set_subtensor(param[:,R], param[:,R] + velocity)
-                    print(subgrad.dtype)
                     yield velocity, self.momentum * velocity - delta
                     yield param, subgrad
                 if len(self.shapes[i])==3:
@@ -249,7 +263,7 @@ class SGD(object):
                     velocity = theano.shared(
                         np.zeros(shape=self.shapes[i][0:-1], dtype=theano.config.floatX), name=param.name + str(R)+'_vel')
                     subgrad = T.set_subtensor(param[:,:,R], param[:,:,R] + velocity)
-                    print(subgrad.dtype)
+
                     yield velocity, self.momentum * velocity - delta
                     yield param, subgrad
                 if len(self.shapes[i])==4:
@@ -257,15 +271,16 @@ class SGD(object):
                     velocity = theano.shared(
                         np.zeros(shape=self.shapes[i][0:-1], dtype=theano.config.floatX), name=param.name + str(R)+'_vel')
                     subgrad = T.set_subtensor(param[:,:,:,R], param[:,:,:,R] + velocity)
-                    print(subgrad.dtype)
                     yield velocity, self.momentum * velocity - delta
                     yield param, subgrad
 
 
     def evaluate(self, iteration, valid_set):
+        print("Evaluating")
+
         costs = list(zip(
             self.cost_names,
-            np.mean([self.f_eval(x).reshape(-1,1) for x in valid_set], axis=0)))
+            np.mean([self.f_eval(x.reshape(1,-1)) for x in valid_set], axis=0)))
 
         print(costs)
 
@@ -303,56 +318,63 @@ class SGD(object):
             iteration += 1
 
             if iteration % self.valid_freq == 0:
+                self.network.update_EU() #This is a hack to use calculate embeddings rather than reculaculate for every batch
                 print(valid_set[0].shape)
                 print(self.evaluate(iteration, valid_set))
 
+import sys
 
 class Scipy(SGD):
     '''General trainer for neural nets using `scipy.optimize.minimize`.'''
 
     METHODS = ('l-bfgs-b', 'cg', 'dogleg', 'newton-cg', 'trust-ncg')
 
-    def __init__(self, network, num_updates=10, L2=0, method = 'bfgs'):
-        super(Scipy, self).__init__(network, L2=L2, num_updates=num_updates)
+    def __init__(self, network, num_updates=10, L2=0.0001, method = 'l-bfgs-b'):
+        SGD.__init__(self,network=network, L2=L2, num_updates=num_updates, compile=False)
 
         self.method = method
 
         logging.info('compiling gradient function')
+
+        #TODO: poprawic szybkosc
+        self.f_eval = theano.function(network.inputs, self.cost_exprs_update)
+        self.f_eval_fast = theano.function(network.inputs, self.cost_exprs_evaluate)
         self.f_grad = theano.function(network.inputs, T.grad(self.cost, self.params))
 
+    @timed
     def function_at(self, x, train_set):
         self.set_params(self.flat_to_arrays(x))
-        return np.mean([self.f_eval(x)[0] for x in train_set])
+        return np.mean([self.f_eval(x)[0] for x in train_set]).astype(np.float64) #lbfgs fortran code wants float64. meh
 
+    @timed
     def gradient_at(self, x, train_set):
         self.set_params(self.flat_to_arrays(x))
         grads = [[] for _ in range(len(self.params))]
         for x in train_set:
             for i, g in enumerate(self.f_grad(x)):
                 grads[i].append(np.asarray(g))
-        return self.arrays_to_flat([np.mean(g, axis=0) for g in grads])
+        G = self.arrays_to_flat([np.mean(g, axis=0) for g in grads]).astype(np.float64) #lbfgs fortran code wants float64. meh
+        return G
 
-    def train_scipy(self, train_set, valid_set=None):
+    def train_scipy(self, train_set, valid_set=None, num_updates=100000):
+        current_batch = 0
+
         def display(x):
             self.set_params(self.flat_to_arrays(x))
-            costs = np.mean([self.f_eval(x) for x in train_set], axis=0)
+            costs = self.f_eval(train_set[current_batch])
             cost_desc = ' '.join(
                 '%s=%.6f' % el for el in zip(self.cost_names, costs))
-            logging.info('scipy %s %i %s',
-                         self.method, i + 1, cost_desc)
+            print('scipy %s %i %s' %
+                  (self.method, i + 1, cost_desc))
+            sys.stdout.flush()
 
         print("Training on "+str(len(train_set))+" batches")
 
-        for i in range(self.num_updates):
-            try:
-                if not self.evaluate(i, valid_set):
-                    logging.info('patience elapsed, bailing out')
-                    break
-            except KeyboardInterrupt:
-                logging.info('interrupted!')
-                break
+        for i in range(min(self.num_updates, num_updates)):
 
             for batch_id, batch in enumerate(train_set):
+                current_batch = current_batch
+
                 try:
                     res = scipy.optimize.minimize(
                         fun=self.function_at,
@@ -364,7 +386,7 @@ class Scipy(SGD):
                         options=dict(maxiter=5),
                     )
                 except KeyboardInterrupt:
-                    logging.info('interrupted!')
+                    print('interrupted!')
                     break
 
                 @timed
@@ -372,5 +394,18 @@ class Scipy(SGD):
                     self.set_params(self.flat_to_arrays(res.x))
 
                 set()
+
+                try:
+                    if not self.evaluate(i, valid_set):
+                        print('patience elapsed, bailing out')
+                        break
+                except KeyboardInterrupt:
+                    print('interrupted!')
+                    break
+
+
+                sys.stdout.flush()
+                sys.stderr.flush()
+
         self.set_params(self.best_params)
 
