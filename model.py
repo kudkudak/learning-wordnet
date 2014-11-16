@@ -1,6 +1,8 @@
+#Todo: TensorKnowledgeLearner -> to many objects that shared E and U matrices
+
 #Todo: random batch sampling
 
-from config import *
+from config.config import *
 from utils import *
 
 import scipy
@@ -46,48 +48,59 @@ from theano import ProfileMode
 """
 
 
+def createNetworks(entity_matrix, embedding_matrix, R=range(11), k=3):
+    #Common
+    E, U= \
+            theano.sparse.sharedvar.sparse_constructor(entity_matrix, name="E"), \
+            theano.shared(np.asarray(embedding_matrix, dtype=theano.config.floatX), name="U")
+
+    EU = theano.shared(np.zeros(shape=(entity_matrix.shape[0], embedding_matrix.shape[1]), dtype=theano.config.floatX), name="EU")
+
+    embedding_size = embedding_matrix.shape[1]
 
 
+    networks = []
+    for r in R:
+        networks.append(TensorKnowledgeLearner(R=r, k=k, E=E, U=U, EU=EU, embedding_size=embedding_size))
+
+    return networks
+
+def saveNetworks(networks, file):
+    params = []
+    for n in networks:
+        params.append(n.params)
+    import cPickle
+    cPickle.dump(params, open(file, "w"))
 
 class TensorKnowledgeLearner(object):
-    def __init__(self, R, k, embedding_matrix, entity_matrix):
-        """
-        """
-
-
+    def __init__(self, R, k, E, U, EU, embedding_size):
         self.k = k # Slices count
-        self.R = R # Relation indexes
-        self.R_dict = {}
-        for i,r in enumerate(R):
-            self.R_dict[r] = i
-        self.embedding_size = embedding_matrix.shape[1]
+        self.R = R
+        self.embedding_size = embedding_size
 
         init_range = 0.1
 
-        print(theano.config.floatX)
-
         # Setup params
         #Tensor matrix
-        W = np.random.uniform(low=-init_range, high=init_range, size=(self.embedding_size, self.embedding_size, k, len(self.R)))
+        W = np.random.uniform(low=-init_range, high=init_range, size=(self.embedding_size, self.embedding_size, k))
         #Neural matrix
-        V = np.random.uniform(low=-init_range, high=init_range, size=(2*self.embedding_size, k, len(self.R)))
+        V = np.random.uniform(low=-init_range, high=init_range, size=(2*self.embedding_size, k))
         #Bias
-        b = np.random.uniform(low=-init_range, high=init_range, size=(k, len(self.R)))
+        b = np.random.uniform(low=-init_range, high=init_range, size=(k,))
         #Concatenation
-        u = np.random.uniform(low=-init_range, high=init_range, size=(k, len(self.R)))
+        u = np.random.uniform(low=-init_range, high=init_range, size=(k, ))
 
         self.embedding_size_t = theano.shared(self.embedding_size)
-        self.E, self.U, self.W = \
-            theano.sparse.sharedvar.sparse_constructor(entity_matrix, name="E"), \
-            theano.shared(np.asarray(embedding_matrix, dtype=theano.config.floatX), name="U"), \
-            theano.shared(np.asarray(W, dtype=theano.config.floatX), name="W")
-        self.V, self.b, self.u = theano.shared(np.asarray(V, dtype=theano.config.floatX), name="V"), \
-                                 theano.shared(np.asarray(b, dtype=theano.config.floatX), name="b"), \
-                                 theano.shared(np.asarray(u, dtype=theano.config.floatX), name="u")
+        self.W = theano.shared(np.asarray(W, dtype=theano.config.floatX), name="W")
 
-        self.params = [self.U, self.W, self.V, self.b, self.u]
+        self.E, self.U, self.EU = E, U, EU # Shared among networks
 
-        self.EU = theano.shared(np.zeros(shape=(entity_matrix.shape[0], embedding_matrix.shape[1]), dtype=theano.config.floatX), name="EU")
+        self.V, self.b, self.u = theano.shared(np.asarray(V, dtype=theano.config.floatX), name="V"+str(R)), \
+                                 theano.shared(np.asarray(b, dtype=theano.config.floatX), name="b"+str(R)), \
+                                 theano.shared(np.asarray(u, dtype=theano.config.floatX), name="u"+str(R))
+
+        self.params = [self.W, self.U, self.V, self.b, self.u]
+
 
         self.input = T.lmatrix()
 
@@ -98,8 +111,7 @@ class TensorKnowledgeLearner(object):
         EU = theano.sparse.dot(self.E, self.U) # It is only expression, not evaluated yet
 
         values, _ = theano.scan(fn=lambda idx: self.activation(EU[self.input[idx,0]],\
-                                                               EU[self.input[idx,2]],\
-                                                               self.R_dict[self.input[idx, c["REL_IDX"]]]),\
+                                                               EU[self.input[idx,2]]),\
                                   sequences=[theano.tensor.arange(self.input.shape[0])])
 
         return theano.function([self.input], values)
@@ -108,52 +120,37 @@ class TensorKnowledgeLearner(object):
         self.EU.set_value(T.cast(theano.sparse.dot(self.E, self.U), theano.config.floatX).eval())
 
     def cost(self, use_old_EU=False):
-        R = self.input[0, c["REL_IDX"]] ## IMPORTANT BATCH IS CONSISTENT FOR COST
-
         EU = self.EU
         if not use_old_EU:
             EU = T.cast(theano.sparse.dot(self.E, self.U), theano.config.floatX) #duzo niepotrzebne.. 20k batch ,
 
-        self.margin = 1.0 - (self.activation(EU[self.input[:,0]], EU[self.input[:,2]], R) -
-                             self.activation(EU[self.input[:,3]], EU[self.input[:,4]], R))
+        self.margin = 1.0 - (self.activation(EU[self.input[:,0]], EU[self.input[:,2]]) -
+                             self.activation(EU[self.input[:,3]], EU[self.input[:,4]]))
 
+        ##return T.sum(T.maximum(0.0, self.margin))
+        indexes = (self.margin > 0).nonzero()
         #return T.sum(T.maximum(0.0, self.margin))
-        return T.sum(self.margin[(self.margin > 0).nonzero()])
+        return (1.0/(self.margin.shape[1]))*T.sum(self.margin[indexes])
          # The margin should be > 1
 
     @property
     def monitors(self):
-        return [["Incorrect percentage", T.sum(self.margin > 0.0) / (0.01+self.margin.shape[0]*self.margin.shape[1])]]
+        return [["Margin shape", self.margin.shape[1]], \
+                ["Incorrect percentage", T.sum(self.margin > 0.0) / (0.01+self.margin.shape[0]*self.margin.shape[1])],
+                ["Incorrect sum", T.sum(self.margin > 0.0)]
+                ]
 
-    def activation(self, ent1, ent2, R):
-        #
-        # #Calculated raw activation of the network
-        # def raw_activation(idx, tensor_slice, e1, e2):
-        #     return theano.dot(theano.dot(e1[idx:idx+1,:], self.W[:,:,tensor_slice, R]), e2[idx:idx+1].T) +\
-        #     theano.dot(self.V[:,tensor_slice:tensor_slice+1, R], T.vertical_stack(e1[idx:idx+1].T, e2[idx:idx+1].T)) +\
-        #     self.b[tensor_slice, R] # Bias part
-
-        #Calculated raw activation of the network
+    def activation(self, ent1, ent2):
         def raw_activation_fast(sl, e1, e2):
-            return T.batched_dot(theano.dot(e1, self.W[:,:,sl,R]), e2) +\
-            theano.dot(T.reshape(self.V[:,sl,R],(1,-1)), T.vertical_stack(e1.T, e2.T)) +\
-            self.b[sl,R] # Bias part
+            return T.batched_dot(theano.dot(e1, self.W[:,:,sl]), e2) +\
+            theano.dot(T.reshape(self.V[:,sl],(1,-1)), T.vertical_stack(e1.T, e2.T)) +\
+            self.b[sl] # Bias part
 
         def tensor_output_fast(e1, e2):
             #return T.add(*[T.mul(self.u[i,R],T.tanh(raw_activation_fast(i, e1, e2))) for i in range(self.k)])
-            return T.mul(self.u[0,R],T.tanh(raw_activation_fast(0, e1, e2))) + \
-                   T.mul(self.u[1,R],T.tanh(raw_activation_fast(1, e1, e2))) \
-                   +T.mul(self.u[2,R],T.tanh(raw_activation_fast(2, e1, e2)))
-        #
-        #
-        # #Tanh nonlinearity and concatenation
-        # def tensor_output(idx, e1, e2):
-        #     return T.add(*[self.u[i]*T.tanh(raw_activation(idx, i, e1, e2)) for i in range(self.k)])
-
-
-        # #Calculate predictions
-        # values, _ = theano.scan(fn=lambda idx: tensor_output(idx, ent1, ent2),\
-        #                          sequences=[theano.tensor.arange(ent1.shape[0])])
+            return T.mul(self.u[0],T.tanh(raw_activation_fast(0, e1, e2))) + \
+                   T.mul(self.u[1],T.tanh(raw_activation_fast(1, e1, e2))) \
+                   +T.mul(self.u[2],T.tanh(raw_activation_fast(2, e1, e2)))
 
         return tensor_output_fast(ent1, ent2)
 
@@ -212,16 +209,13 @@ class SGD(object):
 
         if compile:
             self.f_eval = theano.function(
-            network.inputs, self.cost_exprs_evaluate)
+                network.inputs, self.cost_exprs_evaluate)
 
-            self.f_learn_R = {}
-            for r in network.R:
-                f_learn = theano.function(
-                    network.inputs,
-                    self.cost_exprs_update,
-                    updates=list(self.learning_updates(R=r)),mode=mode)
+            self.f_learn = theano.function(
+                network.inputs,
+                self.cost_exprs_update,
+                updates=list(self.learning_updates()),mode=mode)
 
-                self.f_learn_R[r] = f_learn
 
     def flat_to_arrays(self, x):
         x = x.astype(self.dtype)
@@ -238,89 +232,77 @@ class SGD(object):
         for param, target in zip(self.params, targets):
             param.set_value(target)
 
-    def learning_updates(self, R=0):
+    def learning_updates(self):
         # This code computes updates only for given R, so it drops last dimension. Plus soe theano magic to circumvent its graph comp.
         grads = self.grads
         for i, param in enumerate(self.params):
-            if i==0:
-                delta = self.lr * grads[i]
-                velocity = theano.shared(
-                    np.zeros_like(param.get_value(), dtype=theano.config.floatX), name=param.name +'_vel')
+            delta = self.lr * grads[i]
+            velocity = theano.shared(
+                np.zeros_like(param.get_value(), dtype=theano.config.floatX), name=param.name + str(self.network.R)+'_vel')
 
-                yield velocity, T.cast(self.momentum * velocity - delta, theano.config.floatX)
-                yield param, param + velocity
-            else:
+            yield velocity, T.cast(self.momentum * velocity - delta, theano.config.floatX)
+            yield param, param + velocity
 
-                if len(self.shapes[i])==2:
-                    delta = self.lr * grads[i][:,R]
-                    velocity = theano.shared(
-                        np.zeros(shape=self.shapes[i][0:-1], dtype=theano.config.floatX), name=param.name + str(R)+'_vel')
-                    subgrad = T.set_subtensor(param[:,R], param[:,R] + velocity)
-                    yield velocity, self.momentum * velocity - delta
-                    yield param, subgrad
-                if len(self.shapes[i])==3:
-                    delta = self.lr * grads[i][:,:,R]
-                    velocity = theano.shared(
-                        np.zeros(shape=self.shapes[i][0:-1], dtype=theano.config.floatX), name=param.name + str(R)+'_vel')
-                    subgrad = T.set_subtensor(param[:,:,R], param[:,:,R] + velocity)
-
-                    yield velocity, self.momentum * velocity - delta
-                    yield param, subgrad
-                if len(self.shapes[i])==4:
-                    delta = self.lr * grads[i][:,:,:,R]
-                    velocity = theano.shared(
-                        np.zeros(shape=self.shapes[i][0:-1], dtype=theano.config.floatX), name=param.name + str(R)+'_vel')
-                    subgrad = T.set_subtensor(param[:,:,:,R], param[:,:,:,R] + velocity)
-                    yield velocity, self.momentum * velocity - delta
-                    yield param, subgrad
+    @timed
+    def train_minibatch(self, x):
+        return self.f_learn(x)
 
 
-    def evaluate(self, iteration, valid_set):
-        print("Evaluating")
 
-        costs = list(zip(
-            self.cost_names,
-            np.mean([self.f_eval(x.reshape(1,-1)) for x in valid_set], axis=0)))
+class AdaDelta(SGD):
+    '''This is a base class for all trainers.'''
 
-        print(costs)
+    def __init__(self, network, decay=0.95, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.0001, compile=True):
+        SGD.__init__(self,network=network, profile=profile, lr=lr, momentum=momentum, epochs=epochs, num_updates=num_updates,  valid_freq=valid_freq,
+                     L2=L2, compile=False)
 
-        return True
+        self.decay = decay
 
-    def train_minibatch(self, x, R=None):
-        if R is not None:
-            return self.f_learn_R[x[0,c["REL_IDX"]]](x)
-        else:
-            return self.f_learn(x)
+        assert(0 <= self.decay <= 1)
 
-    def train(self, train_batches, valid_set=None, num_updates=1000000):
-        iteration = 0
+        if compile:
+            self.f_eval = theano.function(
+                network.inputs, self.cost_exprs_evaluate)
 
-        while iteration < min(num_updates, self.num_updates):
-            batch_res = []
+            self.f_learn = theano.function(
+                network.inputs,
+                self.cost_exprs_update,
+                updates=list(self.learning_updates()),mode="FAST_RUN")
 
-            time_start = time.time()
-            for id, batch in enumerate(train_batches):
-                if id%4 == 0 and id>0:
-                    print(str(id) +" "+ str(time.time() - time_start))
-                    time_start = time.time()
-                    if self.profile:
-                        ProfileMode.print_summary()
+    def learning_updates(self):
+        # This code computes updates only for given R, so it drops last dimension. Plus soe theano magic to circumvent its graph comp.
+        grads = self.grads
+        for i, param in enumerate(self.params):
 
-                batch_res.append(self.train_minibatch(batch, R=True))
+            mean_square_grad = theano.shared(
+                np.zeros_like(param.get_value(), dtype=theano.config.floatX), name=param.name + str(self.network.R)+'_msg')
 
-            costs = list(zip(
-                self.cost_names,
-                np.mean(batch_res, axis=0)))
+            mean_square_dx = theano.shared(
+                np.zeros_like(param.get_value(), dtype=theano.config.floatX), name=param.name + str(self.network.R)+'_dx')
 
-            print(iteration)
-            print(costs)
 
-            iteration += 1
+            # Accumulate gradient
+            new_mean_squared_grad = (
+                self.decay * mean_square_grad +
+                (1 - self.decay) * T.sqr(grads[i])
+            )
 
-            if iteration % self.valid_freq == 0:
-                self.network.update_EU() #This is a hack to use calculate embeddings rather than reculaculate for every batch
-                print(valid_set[0].shape)
-                print(self.evaluate(iteration, valid_set))
+            # Compute update
+            epsilon = self.lr
+            rms_dx_tm1 = T.sqrt(mean_square_dx + epsilon)
+            rms_grad_t = T.sqrt(new_mean_squared_grad + epsilon)
+            delta_x_t = - (rms_dx_tm1 / rms_grad_t) * grads[i]
+
+            # Accumulate updates
+            new_mean_square_dx = (
+                self.decay * mean_square_dx +
+                (1 - self.decay) * T.sqr(delta_x_t)
+            )
+
+            # Apply update
+            yield mean_square_grad, T.cast(new_mean_squared_grad, dtype=theano.config.floatX)
+            yield mean_square_dx, T.cast(new_mean_square_dx, dtype=theano.config.floatX)
+            yield param,  param + (400.0 if i==0 or i==1 else 20.0)*T.cast(delta_x_t, dtype=theano.config.floatX)
 
 import sys
 
@@ -336,76 +318,53 @@ class Scipy(SGD):
 
         logging.info('compiling gradient function')
 
-        #TODO: poprawic szybkosc
         self.f_eval = theano.function(network.inputs, self.cost_exprs_update)
-        self.f_eval_fast = theano.function(network.inputs, self.cost_exprs_evaluate)
         self.f_grad = theano.function(network.inputs, T.grad(self.cost, self.params))
+
 
     @timed
     def function_at(self, x, train_set):
-        self.set_params(self.flat_to_arrays(x))
-        return np.mean([self.f_eval(x)[0] for x in train_set]).astype(np.float64) #lbfgs fortran code wants float64. meh
+        self.set_params(self.flat_to_arrays(x.astype(np.float32)))
+        return np.mean([self.f_eval(y)[0] for y in train_set]).astype(np.float64) #lbfgs fortran code wants float64. meh
 
     @timed
     def gradient_at(self, x, train_set):
-        self.set_params(self.flat_to_arrays(x))
+        self.set_params(self.flat_to_arrays(x.astype(np.float32)))
         grads = [[] for _ in range(len(self.params))]
-        for x in train_set:
-            for i, g in enumerate(self.f_grad(x)):
+        for y in train_set:
+            for i, g in enumerate(self.f_grad(y)):
                 grads[i].append(np.asarray(g))
         G = self.arrays_to_flat([np.mean(g, axis=0) for g in grads]).astype(np.float64) #lbfgs fortran code wants float64. meh
         return G
 
-    def train_scipy(self, train_set, valid_set=None, num_updates=100000):
-        current_batch = 0
-
-        def display(x):
-            self.set_params(self.flat_to_arrays(x))
-            costs = self.f_eval(train_set[current_batch])
+    def train_minibatch(self, x):
+        def display(p):
+            self.set_params(self.flat_to_arrays(p.astype(np.float32)))
+            costs = self.f_eval(x)
             cost_desc = ' '.join(
                 '%s=%.6f' % el for el in zip(self.cost_names, costs))
-            print('scipy %s %i %s' %
-                  (self.method, i + 1, cost_desc))
+            print('scipy %s %s' %
+                  (self.method, cost_desc))
             sys.stdout.flush()
 
-        print("Training on "+str(len(train_set))+" batches")
 
-        for i in range(min(self.num_updates, num_updates)):
+        try:
+            res = scipy.optimize.minimize(
+                fun=self.function_at,
+                jac=self.gradient_at,
+                x0=self.arrays_to_flat(self.best_params),
+                args=([x], ),
+                method=self.method,
+                callback=display,
+                options=dict(maxiter=5),
+            )
+        except KeyboardInterrupt:
+            print('interrupted!')
 
-            for batch_id, batch in enumerate(train_set):
-                current_batch = current_batch
+        @timed
+        def set():
+            params = self.flat_to_arrays(res.x.astype(np.float32))
+            self.set_params(params)
 
-                try:
-                    res = scipy.optimize.minimize(
-                        fun=self.function_at,
-                        jac=self.gradient_at,
-                        x0=self.arrays_to_flat(self.best_params),
-                        args=([batch], ),
-                        method=self.method,
-                        callback=display,
-                        options=dict(maxiter=5),
-                    )
-                except KeyboardInterrupt:
-                    print('interrupted!')
-                    break
-
-                @timed
-                def set():
-                    self.set_params(self.flat_to_arrays(res.x))
-
-                set()
-
-                try:
-                    if not self.evaluate(i, valid_set):
-                        print('patience elapsed, bailing out')
-                        break
-                except KeyboardInterrupt:
-                    print('interrupted!')
-                    break
-
-
-                sys.stdout.flush()
-                sys.stderr.flush()
-
-        self.set_params(self.best_params)
+        set()
 

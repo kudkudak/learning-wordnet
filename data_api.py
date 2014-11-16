@@ -1,7 +1,7 @@
 """
 This file contains functions retrieving data from disk
 """
-from config import *
+from config.config import *
 from utils import *
 
 import scipy
@@ -151,23 +151,25 @@ def prepare_experiment_data(dataset="Wordnet", CV=0):
 
 import random
 
+def split_per_relation(X, rel):
+    X_test_all = []
+    for rel_idx in range(len(rel)):
+        X_test_all.append(X[X[:,REL_IDX]==rel_idx])
+
+    return X_test_all
+
 @cached_FS(load_fnc=numpy_load_fnc, save_fnc=numpy_save_fnc, check_fnc=numpy_check_fnc)
 def generate_batches(E, batch_size=100, \
-                     randomize=True, seed=0, split_relation=True, multiplication=10):
-    train_data = get_corrupted_randomly_data(E["X"], dataset=E["dataset"], multiplication=multiplication, seed=seed)
-    #test_data = E["X_test"]
-
+                     randomize=True, seed=0, split_relation=True, multiplication=10, both_sides=False):
+    train_data = get_corrupted_randomly_data(E["X"], dataset=E["dataset"], multiplication=multiplication, seed=seed, both_sides=both_sides)
     ent, rel = E['ent'], E['rel']
 
     X_all = [train_data]
-    #X_test_all = [test_data]
 
     if split_relation:
         X_all = []
-        #X_test_all = []
         for rel_idx in range(len(rel)):
             X_all.append(train_data[train_data[:,REL_IDX]==rel_idx])
-            #X_test_all.append(test_data[test_data[:,REL_IDX]==rel_idx])
 
 
     X_batches = []
@@ -175,7 +177,10 @@ def generate_batches(E, batch_size=100, \
         eq = M.shape[0] - M.shape[0]%batch_size
         if eq > 0:
             X_batches += np.split(M[0:eq], eq/batch_size)
-            X_batches.append(M[eq:])
+            #if M.shape[0] - eq < batch_size/5:
+            X_batches[-1] = np.vstack([X_batches[-1], M[eq:]])
+            #else:
+            #    X_batches.append(M[eq:])
         else:
             X_batches.append(M)
 

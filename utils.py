@@ -6,7 +6,7 @@ import time
 import os
 import cPickle
 import numpy
-from config import logger, c
+from config.config import logger, c
 import pickle
 import numpy as np
 import glob
