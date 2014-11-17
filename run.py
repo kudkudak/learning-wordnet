@@ -43,20 +43,29 @@ def train_model():
 
     X_test = split_per_relation(X["X_test"], range(11))
 
-    for i in range(200):
-        print(i)
+    for i in range(1200):
+        print("EPOCH"+str(i))
 
-        batches_train = generate_batches(E=X, batch_size=40000, seed=i)
+
+        batches_train = generate_batches(E=X, batch_size=40000, seed=i%60, both_sides=False)
         for batch_id, batch in enumerate(batches_train):
             print("-------------- "+str(batch[0,1])+" -----------")
-            for k in range(5):
-                print(trainers[batch[0,1]].train_minibatch(batch))
+            for k in range(1): #Just try overlearn 0 batch?
+                costs = trainers[batch[0,1]].train_minibatch(batch)
+                cost_desc = ' '.join(
+                '%s=%.6f' % el for el in zip(trainers[0].cost_names, costs))
+                print(cost_desc)
 
         networks[0].update_EU()
-
-        results_test = np.sum([trainers[x[0,1]].f_eval(x.reshape(1,-1)) for x in X_test], axis=0).reshape(-1)
+        partial_results = [trainers[x[0,1]].f_eval(x) for x in X_test]
+        print(partial_results)
+        results_test = np.sum(partial_results, axis=0).reshape(-1)
         results_test[0:-1] = results_test[0:-1]/(float(results_test.shape[0]-1))
+
+        print(results_test[-1])
+
         results_test[-1] = results_test[-1] / (float(X["X_test"].shape[0]))
+
 
 
         costs = list(zip(
@@ -65,8 +74,8 @@ def train_model():
 
         print(costs)
 
-        if(i%10 == 0):
-            saveNetworks(networks, "16_11_1_iter"+str(i)+".cpickle")
+        if(i%50 == 0):
+            saveNetworks(networks, "msi_17_11_1_iter"+str(i)+".cpickle")
 
 
 train_model()

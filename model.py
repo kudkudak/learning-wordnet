@@ -22,32 +22,6 @@ from theano import ProfileMode
 
 
 
-"""
-
-        self.W, self.V, self.b, self.u = [],[],[],[]
-        self.embedding_size_t = theano.shared(self.embedding_size)
-        self.E = theano.sparse.sharedvar.sparse_constructor(entity_matrix, name="E")
-        self.U = theano.shared(embedding_matrix, name="U")
-
-        for r in R:
-            # Setup params
-            #Tensor matrix
-            W = np.random.uniform(low=-init_range, high=init_range, size=(self.embedding_size, self.embedding_size, k, len(self.R)))
-            #Neural matrix
-            V = np.random.uniform(low=-init_range, high=init_range, size=(2*self.embedding_size, k, len(self.R)))
-            #Bias
-            b = np.random.uniform(low=-init_range, high=init_range, size=(k, len(self.R)))
-            #Concatenation
-            u = np.random.uniform(low=-init_range, high=init_range, size=(k, len(self.R)))
-
-
-            self.W.append(theano.shared(W, name="W"))
-            self.V.append(theano.shared(V, name="V"))
-            self.b.append(theano.shared(b, name="b"))
-            self.u.append(theano.shared(u, name="u"))
-"""
-
-
 def createNetworks(entity_matrix, embedding_matrix, R=range(11), k=3):
     #Common
     E, U= \
@@ -68,9 +42,11 @@ def createNetworks(entity_matrix, embedding_matrix, R=range(11), k=3):
 def saveNetworks(networks, file):
     params = []
     for n in networks:
-        params.append(n.params)
+        params.append(n.dump_params())
     import cPickle
-    cPickle.dump(params, open(file, "w"))
+    cPickle.dump({"network_params":params, "embedding_matrix":networks[0].U.get_value(borrow=True)}, open(file, "w"))
+
+
 
 class TensorKnowledgeLearner(object):
     def __init__(self, R, k, E, U, EU, embedding_size):
@@ -78,11 +54,11 @@ class TensorKnowledgeLearner(object):
         self.R = R
         self.embedding_size = embedding_size
 
-        init_range = 0.1
-
+        init_range = 0.07
+        init_range_W = 0.001
         # Setup params
         #Tensor matrix
-        W = np.random.uniform(low=-init_range, high=init_range, size=(self.embedding_size, self.embedding_size, k))
+        W = np.random.uniform(low=-init_range_W, high=init_range_W, size=(self.embedding_size, self.embedding_size, k))
         #Neural matrix
         V = np.random.uniform(low=-init_range, high=init_range, size=(2*self.embedding_size, k))
         #Bias
@@ -105,6 +81,18 @@ class TensorKnowledgeLearner(object):
         self.input = T.lmatrix()
 
         self.inputs = [self.input] # For trainer
+
+    def dump_params(self):
+        return [p.get_value(borrow=True) for p in self.params if p!=self.U]
+
+    def load_params(self, params):
+        assert(len(params)==4)
+        id_params = 0
+        for id, p in enumerate(self.params):
+            if(id == 1):
+                continue #skip setting global U
+            self.params[id].set_value(params[id_params])
+            id_params += 1
 
     @property
     def f_prop(self):
@@ -133,10 +121,16 @@ class TensorKnowledgeLearner(object):
         return (1.0/(self.margin.shape[1]))*T.sum(self.margin[indexes])
          # The margin should be > 1
 
+    def f_prop(self):
+        return self.activation(self.EU[self.input[:,0]], self.EU[self.input[:,2]])
+
     @property
     def monitors(self):
         return [["Margin shape", self.margin.shape[1]], \
                 ["Incorrect percentage", T.sum(self.margin > 0.0) / (0.01+self.margin.shape[0]*self.margin.shape[1])],
+                ["Mean W weight", T.mean(T.mean(abs(self.W)))],
+                ["Mean U weight", T.mean(T.mean(abs(self.U)))],
+                ["Mean V weight", T.mean(T.mean(abs(self.V)))],
                 ["Incorrect sum", T.sum(self.margin > 0.0)]
                 ]
 
@@ -159,7 +153,7 @@ import time
 class SGD(object):
     '''This is a base class for all trainers.'''
 
-    def __init__(self, network, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.0001, compile=True):
+    def __init__(self, network, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.00005, compile=True):
         self.profile = profile
 
 
@@ -176,7 +170,9 @@ class SGD(object):
         self.epochs = epochs
         self.params = network.params
 
-        self.cost = network.cost() + np.float32(L2)*T.sum([(p**2).sum() for p in self.params])
+        self.cost = network.cost() + np.float32(L2)*T.sum([(p**2).sum() for p in self.params[2:]]) \
+                    + np.float32(L2*0.05)*T.sum([(p**2).sum() for p in self.params[0:2]])
+
         self.grads = T.grad(self.cost, self.params)
 
         # Expressions evaluated for training
@@ -302,7 +298,7 @@ class AdaDelta(SGD):
             # Apply update
             yield mean_square_grad, T.cast(new_mean_squared_grad, dtype=theano.config.floatX)
             yield mean_square_dx, T.cast(new_mean_square_dx, dtype=theano.config.floatX)
-            yield param,  param + (400.0 if i==0 or i==1 else 20.0)*T.cast(delta_x_t, dtype=theano.config.floatX)
+            yield param,  param + 2*T.cast(delta_x_t, dtype=theano.config.floatX)
 
 import sys
 

@@ -48,17 +48,12 @@ def get_data_desc(dataset="Wordnet"):
     return basic
 
 
-import itertools
 def get_test_data(dataset="Wordnet"):
     data_desc = get_data_desc(dataset=dataset)
     ent, rel = data_desc['ent'], data_desc['rel']
-
     data = []
-    row = []
-    Y = []
     with open(os.path.join(dataset_to_dir(dataset), "test_all.txt"), "r") as f:
         for i, l in enumerate(f):
-            row = l.strip("\n").split()
             e1, r, e2, y = l.strip("\n").split()
             if i%2 == 0:
                 data.append([ent[e1], rel[r], ent[e2]])
@@ -160,7 +155,7 @@ def split_per_relation(X, rel):
 
 @cached_FS(load_fnc=numpy_load_fnc, save_fnc=numpy_save_fnc, check_fnc=numpy_check_fnc)
 def generate_batches(E, batch_size=100, \
-                     randomize=True, seed=0, split_relation=True, multiplication=10, both_sides=False):
+                     randomize=True, seed=0, split_relation=True, multiplication=10, both_sides=True):
     train_data = get_corrupted_randomly_data(E["X"], dataset=E["dataset"], multiplication=multiplication, seed=seed, both_sides=both_sides)
     ent, rel = E['ent'], E['rel']
 
