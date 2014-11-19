@@ -1,0 +1,121 @@
+16_11_1
+
+L2 normalne, 40k batc
+
+16_11_3
+
+L2 normalne, 40k batch
+
+msi_16_11_1
+
+L2 normalne, 20k batch
+
+msi_16_11_2
+
+L2 ** 2 dla W i U - troche glupio, 40k batch :P
+
+16_11_4
+
+L2*0.01, 40k batch, gradient unormowany (*10)
+
+16_11_5
+
+L2*0.01, 60k batch, gradient unormowany (*3)
+
+msi_16_11_3
+
+L2 *0.01, 40k batch, sub grad 1, gradient unormowany (*3)
+
+msi_16_11_4
+
+L2 *0.005, 40k batch, sub grad 1, gradient unormowany (*2), 600 iteracji
+
+msi_17_1_1
+
+Wydaje mi sie ze overfituje (szczegolnie 0), dlatego dalem L2 *0.05 nie 0.005
+40k batch, sub grad 1, gradient unormowany (*2), 600 iteracji
+
+witek_17_11_1
+
+60k batch, L2 nie skalowane, gradient unormowany (*2)
+
+witek_17_11_2
+
+60k batch, L2 IDENTYCZNY jak w publikacji, sub grad 3 razy
+
+msi_17_1_2
+
+L2 * 0.05 overfituje tez. Puszczam orginalny eksperyment (L2 = 0.005) zobaczymy co wyjdzie..
+
+msi_17_1_4
+
+Prawdopodobnie nic ciekawego, chyba ze wyjdzie cos to sie przyjrze. L2*0.3 ale tylko na W, 40k batch.
+Czyli podobnie do orginalnego eksperymentu ale z mniejsza regularyzajca W (tylko W).
+
+17_1_1
+
+L1 - first try. L1*0.05 tylko na W
+: Za duza regularyzacja (0.55)
+=============================
+
+msi_18_1_1
+
+Wydaje mi sie ze W overfituje, a U jest zbyt zjadane.
+L2 dla W = L2, L2 dla U = 0.05 * L2
+
+msi_18_1_2
+
+Probuje L-BFGS. L2 dla W i U 0.5 (Bo inaczej juz overfituje po 1 epoce)
+Wynik: zoverfitowal po 4 epokach
+
+*msi_18_1_3*
+
+Probuje przebic 0.44% - puszczam z 3 razy podwyzszona regularyzacja U i 2 razy (0.5) obnizona W :)
+Wynik: (0 zostaje na 80%, calosc na 67%), nie rozstrzygajacy
+
+msi_18_1_4
+
+Probuje przebic 0.44% - 2*regularyzacja U, 0.5*regularyzacja W
+Wynik: Overfitting. Weight U=0.08.
+
+*msi_18_11_5*
+
+Cos jest nie tak. Siec overfittuje, co nie powinno byc przy duzej regularyzacji. Czyli 2*U i 0.5*W to ZA MALA regularyzacja.  
+Probuje dac wszystko na 1.1 i U na 2.3. Zobaczymy.  Zmniejsze tez lagodnie LR do 1.5
+Wynik: ZOverfitowal ale do 58% (czyli nie tak bardzo).  Najlepsze (najbardzeij sensowne) wyniki! Ok. 70%!
+[-0.64285714285714279, -0.091836734693877098, -0.45918367346938727, -0.27551020408163218, 0.27551020408163307, -0.45918367346938727, -0.091836734693877098, -0.27551020408163218, -0.091836734693877098, -0.82653061224489788, -1.010204081632653]
+0.698775944651
+[0.54054732613607837, 0.82114653407429072, 0.60824372759856626, 0.81520270270270268, 0.79874999999999996, 0.61982968369829683, 0.97110552763819091, 0.53421052631578947, 0.9699738903394256, 0.78260869565217395, 0.68571428571428572]
+
+
+witek_18_11_2
+
+Proba w strone deregulrazycji W i nadregularyzacji U: 1.5*U, 0.05*W
+
+Wynik: Zoverfitowal (Doszedl do 49% w ~ 100 epoc)
+
+18_1_1
+
+Dokladnie co w publikacji L-BFGS. 
+Wynik: nie zbiega, lub nie zbieglo a mogloby. Albo mam blad, albo mam duzo wolniejszy kod
+==================================
+
+witek_19_11_1
+
+Nie wierze w AdaDelta - Puszczam witek_18_11_2 z SGD tak zeby porownac
+Wynik: SGD chyba zbiega szybciej
+
+msi_19_11_1
+
+Idac za msi_18_11_5, zwiekszam regularyzacje calosci. Moze stanford dal w default params zla regularyzacje.. (ale w sumie puszczalem *2 juz, to moze *2
+to juz za duzo)
+
+	19_11_1
+	
+	Kontynuacja msi_19_11_1 (od 100 epoki). L2 *= 2.1 i AdaDelta step *=2
+
+
+witek_19_11_2
+
+msi_19_11_1 ale na SGD (i troche inne stale, 1.7 wszystko). Musialem zmniejszyc lr do 1.0 (na 6.0 bardzo oscyluije po 10 epokach juz)
+

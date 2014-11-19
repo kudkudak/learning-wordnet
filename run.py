@@ -6,55 +6,57 @@ from data_api import *
 #1.3 mln przykladow na minute (u mnie 600k przykladow ok.)
 
 def train_model():
-
     X = prepare_experiment_data(dataset="Wordnet", CV=0)
 
-    def compileAdaDelta():
-        print("Creating network")
+    networks = None
+
+    if len(sys.argv) > 1:
+        params = cPickle.load(open(sys.argv[1], "r"))
+        R = range(11)
+        networks = createNetworks(entity_matrix=X["E"], embedding_matrix=params["embedding_matrix"])
+        pars = params["network_params"]
+        for i, n in enumerate(networks):
+            n.load_params(pars[i])
+    else:
         networks = createNetworks(X["E"], X["U"], R=range(11), k=3)
-        print("Created networks")
+
+
+    def compileAdaDelta(networks):
         trainers = []
         for n in networks:
             print("Creating trainer")
             trainers.append(AdaDelta(n,  lr=1e-5, num_updates=200, valid_freq=1))
         return trainers, networks
 
-    def compile():
-        print("Creating network")
-        networks = createNetworks(X["E"], X["U"], R=range(11), k=3)
-        print("Created networks")
+    def compileSGD(networks):
         trainers = []
         for n in networks:
             print("Creating trainer")
             trainers.append(SGD(n,  lr=6.0, num_updates=200, valid_freq=1))
         return trainers, networks
 
-    def compileScipy():
-        print("Creating network")
-        networks = createNetworks(X["E"], X["U"], R=range(11), k=3)
-        print("Created networks")
+    def compileScipy(networks):
         trainers = []
         for n in networks:
             print("Creating trainer")
             trainers.append(Scipy(n, method='l-bfgs-b')) #L2=0))
         return trainers, networks
 
-    trainers, networks = compileAdaDelta()
+    trainers, networks = compileAdaDelta(networks)
 
     X_test = split_per_relation(X["X_test"], range(11))
 
     for i in range(1200):
         print("EPOCH"+str(i))
-
-
-        batches_train = generate_batches(E=X, batch_size=40000, seed=i%60, both_sides=False)
+        batches_train = generate_batches(E=X, batch_size=40000, seed=i, both_sides=False)
         for batch_id, batch in enumerate(batches_train):
             print("-------------- "+str(batch[0,1])+" -----------")
             for k in range(1): #Just try overlearn 0 batch?
                 costs = trainers[batch[0,1]].train_minibatch(batch)
-                cost_desc = ' '.join(
-                '%s=%.6f' % el for el in zip(trainers[0].cost_names, costs))
-                print(cost_desc)
+                if len(costs):
+                    cost_desc = ' '.join(
+                    '%s=%.6f' % el for el in zip(trainers[0].cost_names, costs))
+                    print(cost_desc)
 
         networks[0].update_EU()
         partial_results = [trainers[x[0,1]].f_eval(x) for x in X_test]
@@ -75,7 +77,7 @@ def train_model():
         print(costs)
 
         if(i%50 == 0):
-            saveNetworks(networks, "msi_17_11_1_iter"+str(i)+".cpickle")
+            saveNetworks(networks, "19_11_1"+str(i)+".cpickle")
 
 
 train_model()

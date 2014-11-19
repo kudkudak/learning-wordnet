@@ -153,7 +153,7 @@ import time
 class SGD(object):
     '''This is a base class for all trainers.'''
 
-    def __init__(self, network, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.00005, compile=True):
+    def __init__(self, network, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.00005,L1=0, compile=True):
         self.profile = profile
 
 
@@ -170,8 +170,11 @@ class SGD(object):
         self.epochs = epochs
         self.params = network.params
 
-        self.cost = network.cost() + np.float32(L2)*T.sum([(p**2).sum() for p in self.params[2:]]) \
-                    + np.float32(L2*0.05)*T.sum([(p**2).sum() for p in self.params[0:2]])
+        self.cost = network.cost() + np.float32(L2*2.1)*T.sum([(p**2).sum() for p in self.params[2:]]) \
+                    + np.float32(L2*2.1)*T.sum([(p**2).sum() for p in self.params[0:1]]) \
+                    + np.float32(L2*2.1)*T.sum([(p**2).sum() for p in self.params[1:2]]) \
+                    + np.float32(L1*0.5)*T.sum([(abs(p)).sum() for p in self.params[1:]]) \
+                    + np.float32(L1*0.5)*T.sum([(abs(p)).sum() for p in self.params[0:1]])
 
         self.grads = T.grad(self.cost, self.params)
 
@@ -248,9 +251,9 @@ class SGD(object):
 class AdaDelta(SGD):
     '''This is a base class for all trainers.'''
 
-    def __init__(self, network, decay=0.95, profile=False, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.0001, compile=True):
+    def __init__(self, network, decay=0.95, profile=False,L1=0, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.00005, compile=True):
         SGD.__init__(self,network=network, profile=profile, lr=lr, momentum=momentum, epochs=epochs, num_updates=num_updates,  valid_freq=valid_freq,
-                     L2=L2, compile=False)
+                     L2=L2, L1=L1, compile=False)
 
         self.decay = decay
 
@@ -307,8 +310,8 @@ class Scipy(SGD):
 
     METHODS = ('l-bfgs-b', 'cg', 'dogleg', 'newton-cg', 'trust-ncg')
 
-    def __init__(self, network, num_updates=10, L2=0.0001, method = 'l-bfgs-b'):
-        SGD.__init__(self,network=network, L2=L2, num_updates=num_updates, compile=False)
+    def __init__(self, network, num_updates=10, L2=0.0001, L1=0,  method = 'l-bfgs-b'):
+        SGD.__init__(self,network=network, L2=L2, L1=L1, num_updates=num_updates, compile=False)
 
         self.method = method
 
@@ -352,7 +355,7 @@ class Scipy(SGD):
                 args=([x], ),
                 method=self.method,
                 callback=display,
-                options=dict(maxiter=5),
+                options=dict(maxiter=2),
             )
         except KeyboardInterrupt:
             print('interrupted!')
@@ -363,4 +366,7 @@ class Scipy(SGD):
             self.set_params(params)
 
         set()
+
+
+        return []
 

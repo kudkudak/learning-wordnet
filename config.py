@@ -22,11 +22,6 @@ formatter = logging.Formatter('%(funcName)s - %(asctime)s - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 logger.propagate = False
-ch_file = logging.FileHandler(os.path.join(base_dir, "knowledge_learner.log"))
-ch_file.setLevel(level = logging.INFO)
-ch_file.setFormatter(formatter)
-logger.addHandler(ch_file)
-
 
 
 
