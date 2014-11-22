@@ -8,11 +8,12 @@ params = cPickle.load(open(sys.argv[1], "r"))
 
 
 R = range(11)
-networks = createNetworks(entity_matrix=X["E"], embedding_matrix=params["embedding_matrix"])
+networks = createNetworks(entity_matrix=X["E"], embedding_matrix=params["embedding_matrix"], k=4, only_metric=False)
 pars = params["network_params"]
 
 for i, n in enumerate(networks):
     n.load_params(pars[i])
+
 
 X_test = split_per_relation(X["X_test"], rel=range(11))
 

@@ -103,7 +103,7 @@ Wynik: nie zbiega, lub nie zbieglo a mogloby. Albo mam blad, albo mam duzo wolni
 witek_19_11_1
 
 Nie wierze w AdaDelta - Puszczam witek_18_11_2 z SGD tak zeby porownac
-Wynik: SGD chyba zbiega szybciej
+Wynik: SGD chyba zbiega szybciej, ale nie zbiega do optimum
 
 msi_19_11_1
 
@@ -114,8 +114,128 @@ to juz za duzo)
 	
 	Kontynuacja msi_19_11_1 (od 100 epoki). L2 *= 2.1 i AdaDelta step *=2
 
+	19_11_2
+	
+	Kontynacja 19_11_1 (od 100+50 epoki) z L2 *= 3.1 i W * 0.5 (wydaje mi sie ze W jest nie potrzebnie miazdzone)
+	Wynik: Nic ciekawego, sprobuje puscic od poczatku
 
 witek_19_11_2
 
 msi_19_11_1 ale na SGD (i troche inne stale, 1.7 wszystko). Musialem zmniejszyc lr do 1.0 (na 6.0 bardzo oscyluije po 10 epokach juz)
+Wynik: Gorsza zbieznosc
 
+19_11_3.
+
+Od poczatku puszczony 19_11_2 z AdaDelta * 7
+Wynik:52%, sr zoverfitowal 0:17%
+
+witek_19_11_3
+
+Probuje W*=0.1 reszta *4. AdaDelta *2. 
+Wynik:50%, sr zoverfitowal 0:14%
+
+msi_19_11_2
+
+Regularyzacja W*=0, regulrayzacja innych*=3, AdaDelta *3
+O dziwo zoverifotwal podobnie 0:14%
+
+msi_19_11_3
+
+Regularyzacja W*=0 regularyzacja innych *=1.8, AdaDelta *2
+Wynik: zoverfitowal, brak fajnych rezultatow
+
+msi_19_11_3
+
+Regularyzacja W*=0 regularyzacja innych *=1.3, AdaDelta *2
+Wynik: zoverfitowal, brak fajnych rezultatow
+
+witek_19_11_4
+
+k=4 (!!) Regularyzacja * 1.0
+Porazka
+
+witek_19_11_5
+
+k=4 (!!) Regularyzacja * 1.0, W *= 0.1
+Porazka
+
+====================
+
+witek_20_11_2:
+	L2 = 0.00018, AdaDelta 2.0, k=4
+
+*witek_20_11_1*
+	0.0001 AdaDelta 1.0
+	TODO: restart (ended at 49%)
+
+witek_20_11_3
+	0.0001, AdaDelta * 6
+	Wynik: overfit (47% best)
+
+msi_20_11_3
+	L2 = 0.00013, SGD lr = 3.0
+	Wynik: rozjechal sie
+
+msi_20_11_3b
+	L2 = 0.00013, AdaDelta * 2
+
+
+20_11_1
+	L2=0.001 SGD lr=3
+	Wynik: overfitowal (min 47%)
+
+Co warto zobaczyc:AdaDelta 6.0 vs AdaDelta 1.0 vs SGD 3.0 vs SGD 1.0 
+
+witek_20_11_4
+	V L2 *= 10
+	AdaDelta * 6
+
+20_11_3
+	V L2 *= 20
+	AdaDelta * 3
+
+witek_20_11_5
+	V L2 *= 7
+	AdaDelta * 3
+
+msi_20_11_4
+	V L2 *= 400
+	AdaDelta * 3
+	Wynik: rozbiegl, slaby wynik
+
+msi_20_11_5
+	V L2 *= 400
+	AdaDelta * 3
+	New init range
+	Wynik: rozbiegl, slaby wynik, brak roznicy
+
+msi_20_11_6
+
+	Probuje ubic V, AdaDelta, V.L2=10000
+
+msi_20_11_7
+
+	Probuje ubic V, AdaDelta, V.L2=10000, W.L2 *=0.1
+
+witek_20_11_7
+
+	SGD, lr=1.5, V.L2*=5000, reszte *0.1 <- zupelnie sie rozjechalo (V weight >>>>> e+62)
+
+witek_20_11_8
+
+	L2 *= 1.0, AdaDelta, without linear part, k=4
+
+witek_20_11_9
+
+	L2 *= 2.0 (chyba tak jak w publikacji), AdaDelta, without linear part, k=4
+
+20_11_5
+
+	L2 *= 2.0 (chyba tak jak w publikacji), AdaDelta, z linear part ale BARDZO zregularyzowane, k = 4
+
+
+===============================================
+
+witek_21_11_1
+
+	V.L2 = 50000, bo 10000 jeszcze nie ubilo :P, AdaDelta * 8

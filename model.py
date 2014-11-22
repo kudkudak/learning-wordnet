@@ -22,7 +22,7 @@ from theano import ProfileMode
 
 
 
-def createNetworks(entity_matrix, embedding_matrix, R=range(11), k=3):
+def createNetworks(entity_matrix, embedding_matrix, R=range(11), k=3, only_metric=False):
     #Common
     E, U= \
             theano.sparse.sharedvar.sparse_constructor(entity_matrix, name="E"), \
@@ -35,7 +35,7 @@ def createNetworks(entity_matrix, embedding_matrix, R=range(11), k=3):
 
     networks = []
     for r in R:
-        networks.append(TensorKnowledgeLearner(R=r, k=k, E=E, U=U, EU=EU, embedding_size=embedding_size))
+        networks.append(TensorKnowledgeLearner(R=r, k=k, E=E, U=U, EU=EU, embedding_size=embedding_size, only_metric=only_metric))
 
     return networks
 
@@ -49,13 +49,13 @@ def saveNetworks(networks, file):
 
 
 class TensorKnowledgeLearner(object):
-    def __init__(self, R, k, E, U, EU, embedding_size):
+    def __init__(self, R, k, E, U, EU, embedding_size, only_metric):
         self.k = k # Slices count
         self.R = R
         self.embedding_size = embedding_size
 
-        init_range = 0.07
-        init_range_W = 0.001
+        init_range = 0.00007
+        init_range_W = 0.01
         # Setup params
         #Tensor matrix
         W = np.random.uniform(low=-init_range_W, high=init_range_W, size=(self.embedding_size, self.embedding_size, k))
@@ -75,7 +75,11 @@ class TensorKnowledgeLearner(object):
                                  theano.shared(np.asarray(b, dtype=theano.config.floatX), name="b"+str(R)), \
                                  theano.shared(np.asarray(u, dtype=theano.config.floatX), name="u"+str(R))
 
-        self.params = [self.W, self.U, self.V, self.b, self.u]
+
+        if only_metric == True:
+            self.params = [self.W, self.U, self.u]
+        else:
+            self.params = [self.W, self.U, self.V, self.b, self.u]
 
 
         self.input = T.lmatrix()
@@ -86,7 +90,7 @@ class TensorKnowledgeLearner(object):
         return [p.get_value(borrow=True) for p in self.params if p!=self.U]
 
     def load_params(self, params):
-        assert(len(params)==4)
+        assert(len(params)==len(self.params)-1)
         id_params = 0
         for id, p in enumerate(self.params):
             if(id == 1):
@@ -115,10 +119,12 @@ class TensorKnowledgeLearner(object):
         self.margin = 1.0 - (self.activation(EU[self.input[:,0]], EU[self.input[:,2]]) -
                              self.activation(EU[self.input[:,3]], EU[self.input[:,4]]))
 
+
+        #return theano.tensor.constant(0.0)
         ##return T.sum(T.maximum(0.0, self.margin))
-        indexes = (self.margin > 0).nonzero()
-        #return T.sum(T.maximum(0.0, self.margin))
-        return (1.0/(self.margin.shape[1]))*T.sum(self.margin[indexes])
+        #indexes = (self.margin > 0).nonzero()
+        return T.sum(T.maximum(0.0, self.margin))
+        #return (1.0/(self.margin.shape[1]))*T.sum(self.margin[indexes])
          # The margin should be > 1
 
     def f_prop(self):
@@ -131,20 +137,29 @@ class TensorKnowledgeLearner(object):
                 ["Mean W weight", T.mean(T.mean(abs(self.W)))],
                 ["Mean U weight", T.mean(T.mean(abs(self.U)))],
                 ["Mean V weight", T.mean(T.mean(abs(self.V)))],
+                ["Mean W activation / Mean linear activation", T.mean(abs(self.Wact)/abs(self.Vact))],
                 ["Incorrect sum", T.sum(self.margin > 0.0)]
                 ]
 
     def activation(self, ent1, ent2):
         def raw_activation_fast(sl, e1, e2):
-            return T.batched_dot(theano.dot(e1, self.W[:,:,sl]), e2) +\
-            theano.dot(T.reshape(self.V[:,sl],(1,-1)), T.vertical_stack(e1.T, e2.T)) +\
+            self.Wact = T.batched_dot(theano.dot(e1, self.W[:,:,sl]), e2)
+            self.Vact = theano.dot(T.reshape(self.V[:,sl],(1,-1)), T.vertical_stack(e1.T, e2.T)) +\
             self.b[sl] # Bias part
+            return self.Wact + self.Vact
 
         def tensor_output_fast(e1, e2):
             #return T.add(*[T.mul(self.u[i,R],T.tanh(raw_activation_fast(i, e1, e2))) for i in range(self.k)])
-            return T.mul(self.u[0],T.tanh(raw_activation_fast(0, e1, e2))) + \
-                   T.mul(self.u[1],T.tanh(raw_activation_fast(1, e1, e2))) \
-                   +T.mul(self.u[2],T.tanh(raw_activation_fast(2, e1, e2)))
+            if self.k == 3:
+                return T.mul(self.u[0],T.tanh(raw_activation_fast(0, e1, e2))) + \
+                    T.mul(self.u[1],T.tanh(raw_activation_fast(1, e1, e2))) \
+                    +T.mul(self.u[2],T.tanh(raw_activation_fast(2, e1, e2)))
+            else:
+                return T.mul(self.u[0],T.tanh(raw_activation_fast(0, e1, e2))) + \
+                    T.mul(self.u[1],T.tanh(raw_activation_fast(1, e1, e2))) \
+                    +T.mul(self.u[2],T.tanh(raw_activation_fast(2, e1, e2))) \
+                    +T.mul(self.u[3],T.tanh(raw_activation_fast(3, e1, e2)))
+
 
         return tensor_output_fast(ent1, ent2)
 
@@ -170,12 +185,18 @@ class SGD(object):
         self.epochs = epochs
         self.params = network.params
 
-        self.cost = network.cost() + np.float32(L2*2.1)*T.sum([(p**2).sum() for p in self.params[2:]]) \
-                    + np.float32(L2*2.1)*T.sum([(p**2).sum() for p in self.params[0:1]]) \
-                    + np.float32(L2*2.1)*T.sum([(p**2).sum() for p in self.params[1:2]]) \
-                    + np.float32(L1*0.5)*T.sum([(abs(p)).sum() for p in self.params[1:]]) \
-                    + np.float32(L1*0.5)*T.sum([(abs(p)).sum() for p in self.params[0:1]])
+        print(self.params[2:3])
 
+        self.regul= np.float32(L2*1.0)*T.sum([(p**2).sum() for p in self.params[3:]]) \
+                    + np.float32(L2*1.0)*(self.params[0]**2).sum()\
+                    + np.float32(L2*1.0)*(self.params[1]**2).sum()\
+                    + np.float32(L2*1e1)*((self.params[2]**2).sum())\
+                    + np.float32(L1*1.0)*T.sum([abs(p).sum() for p in self.params[3:]]) \
+                    + np.float32(L1*1.0)*abs(self.params[0]).sum()\
+                    + np.float32(L1*1.0)*abs(self.params[1]).sum()\
+                    + L1*1e1*(abs(self.params[2]).sum())
+
+        self.cost = network.cost() + self.regul
         self.grads = T.grad(self.cost, self.params)
 
         # Expressions evaluated for training
@@ -186,7 +207,7 @@ class SGD(object):
             self.cost_exprs_update.append(monitor)
 
         # Expressions when propagating
-        self.cost_exprs_evaluate = [network.cost(use_old_EU=True) + np.float32(L2)*T.sum([(p**2).sum() for p in self.params]), \
+        self.cost_exprs_evaluate = [network.cost(use_old_EU=True) + self.regul, \
                                 network.cost(use_old_EU=True)]
         for name, monitor in network.monitors:
             self.cost_exprs_evaluate.append(monitor)
@@ -248,6 +269,66 @@ class SGD(object):
 
 
 
+
+
+
+from collections import OrderedDict
+
+class HintonIsGod(SGD):
+    '''This is a base class for all trainers.'''
+
+    def __init__(self, network, max_scaling=1e5, decay=0.9, profile=False,L1=0, lr=0.3, momentum=0.4, epochs=0, num_updates=10,  valid_freq=10, L2=0.00005, compile=True):
+        SGD.__init__(self,network=network, profile=profile, lr=lr, momentum=momentum, epochs=epochs, num_updates=num_updates,  valid_freq=valid_freq,
+                     L2=L2, L1=L1, compile=False)
+
+        self.decay = theano.shared(decay, 'decay')
+        self.epsilon = 1. / max_scaling
+        self.mean_square_grads = OrderedDict()
+
+        if compile:
+            self.f_eval = theano.function(
+                network.inputs, self.cost_exprs_evaluate)
+
+            self.f_learn = theano.function(
+                network.inputs,
+                self.cost_exprs_update,
+                updates=list(self.learning_updates()),mode="FAST_RUN")
+
+    def learning_updates(self):
+        # This code computes updates only for given R, so it drops last dimension. Plus soe theano magic to circumvent its graph comp.
+        grads = self.grads
+        for i, param in enumerate(self.params):
+            mean_square_grad = theano.shared(
+                np.zeros_like(param.get_value(), dtype=theano.config.floatX), name=param.name + str(self.network.R)+'_msg')
+
+            mean_square_grad.name = 'mean_square_grad_' + param.name
+
+            # Store variable in self.mean_square_grads for monitoring.
+            self.mean_square_grads[param.name] = mean_square_grad
+
+            # Accumulate gradient
+            new_mean_squared_grad = (self.decay * mean_square_grad +
+                                     (1 - self.decay) * T.sqr(grads[i]))
+
+            # Compute update
+            scaled_lr = self.lr
+            rms_grad_t = T.sqrt(new_mean_squared_grad)
+            rms_grad_t = T.maximum(rms_grad_t, self.epsilon)
+            delta_x_t = - scaled_lr * grads[i] / rms_grad_t
+
+            # Apply update
+            yield mean_square_grad, T.cast(new_mean_squared_grad, dtype=theano.config.floatX)
+            yield param, T.cast(param + delta_x_t, dtype=theano.config.floatX)
+
+
+
+
+
+
+
+
+
+
 class AdaDelta(SGD):
     '''This is a base class for all trainers.'''
 
@@ -301,7 +382,7 @@ class AdaDelta(SGD):
             # Apply update
             yield mean_square_grad, T.cast(new_mean_squared_grad, dtype=theano.config.floatX)
             yield mean_square_dx, T.cast(new_mean_square_dx, dtype=theano.config.floatX)
-            yield param,  param + 2*T.cast(delta_x_t, dtype=theano.config.floatX)
+            yield param,  param + 1*T.cast(delta_x_t, dtype=theano.config.floatX)
 
 import sys
 
