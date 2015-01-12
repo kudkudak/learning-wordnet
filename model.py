@@ -144,7 +144,7 @@ class TensorKnowledgeLearner(object):
     def activation(self, ent1, ent2):
         def raw_activation_fast(sl, e1, e2):
             self.Wact = T.batched_dot(theano.dot(e1, self.W[:,:,sl]), e2)
-            self.Vact = theano.dot(T.reshape(self.V[:,sl],(1,-1)), T.vertical_stack(e1.T, e2.T)) +\
+            self.Vact = 1e-4 * theano.dot(T.reshape(self.V[:,sl],(1,-1)), T.vertical_stack(e1.T, e2.T)) +\   //1e-4 reflects change of scale
             self.b[sl] # Bias part
             return self.Wact + self.Vact
 
@@ -189,12 +189,12 @@ class SGD(object):
 
         self.regul= np.float32(L2*1.0)*T.sum([(p**2).sum() for p in self.params[3:]]) \
                     + np.float32(L2*1.0)*(self.params[0]**2).sum()\
-                    + np.float32(L2*1.0)*(self.params[1]**2).sum()\
-                    + np.float32(L2*1e1)*((self.params[2]**2).sum())\
+                    + np.float32(L2*0.0)*(self.params[1]**2).sum()\
+                    + np.float32(L2*4e1)*((self.params[2]**2).sum())\
                     + np.float32(L1*1.0)*T.sum([abs(p).sum() for p in self.params[3:]]) \
                     + np.float32(L1*1.0)*abs(self.params[0]).sum()\
-                    + np.float32(L1*1.0)*abs(self.params[1]).sum()\
-                    + L1*1e1*(abs(self.params[2]).sum())
+                    + np.float32(L1*0.0)*abs(self.params[1]).sum()\
+                    + L1*4e1*(abs(self.params[2]).sum())
 
         self.cost = network.cost() + self.regul
         self.grads = T.grad(self.cost, self.params)

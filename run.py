@@ -42,7 +42,7 @@ def train_model():
         trainers = []
         for n in networks:
             print("Creating trainer")
-            trainers.append(HintonIsGod(n,  lr=1e-4, L1=1e-6,  num_updates=200, valid_freq=1))
+            trainers.append(HintonIsGod(n,  lr=1e-3, L1=1e-6,  num_updates=200, valid_freq=1))
         return trainers, networks
 
     def compileScipy(networks):
